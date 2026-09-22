@@ -43,5 +43,30 @@ def get_current_user(
         raise credentials_exception
     return user
 
-CurrentUserDep = Annotated[User, Depends(get_current_user)]
+def get_current_user_refresh(token: Annotated[str, Depends(oauth2_scheme)], session: SessionDep) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.REFRESH_SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+        token_data = TokenData(user_id=user_id)
+    except InvalidTokenError:
+        raise credentials_exception
 
+    try:
+        uid = UUID(token_data.user_id)
+    except (ValueError, TypeError):
+        raise credentials_exception
+
+    user = session.exec(select(User).where(User.id == uid)).first()
+    if user is None:
+        raise credentials_exception 
+    return user
+
+CurrentUserDep = Annotated[User, Depends(get_current_user)]
+CurrentUserRefreshDep = Annotated[User, Depends(get_current_user_refresh)]

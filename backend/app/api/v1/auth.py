@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import select
 
-from app.api.deps import SessionDep, CurrentUserDep
+from app.api.deps import SessionDep, CurrentUserDep, CurrentUserRefreshDep
 from app.core.security import get_hashed_password, verify_password, create_access_token, create_refresh_token
 from app.models.db import User
-from app.models.schemas import UserCreate, UserLogin, UserResponse, Token
+from app.models.schemas import UserCreate, UserLogin, UserResponse, Token, RefreshResponse
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -55,6 +55,10 @@ def login_form(session: SessionDep, form_data: OAuth2PasswordRequestForm = Depen
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
     return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
+
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh_user(current_user: CurrentUserRefreshDep):
+    return RefreshResponse(access_token=create_access_token(data={"sub": str(current_user.id)}))
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(current_user: CurrentUserDep):
