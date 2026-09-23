@@ -16,6 +16,7 @@ class Settings:
     
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///neurachat.db")
+    MAX_TOTAL_SIZE: int = 50 * 1024 * 1024
 
 settings = Settings()
 

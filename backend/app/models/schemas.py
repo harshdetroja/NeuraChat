@@ -70,3 +70,16 @@ class FetchChatResponse(BaseModel):
     title: str
     messages: list[MessageResponse]
     created_at: datetime
+
+# File Schemas
+class FileResponse(BaseModel):
+    id: UUID
+    name: str
+    file_path: str
+    file_size: int
+    mime_type: str | None = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

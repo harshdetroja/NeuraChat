@@ -1,9 +1,10 @@
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, UploadFile, status, File as FastAPIFile
 from sqlmodel import Session, select
 from app.api.deps import SessionDep, CurrentUserDep
-from app.models.db import Chat, Message
-from app.models.schemas import ChatCreate, ChatResponse, FetchChatResponse, MessageResponse
+from app.models.db import Chat, FilesStatus, Message, File
+from app.models.schemas import ChatCreate, ChatResponse, FetchChatResponse, MessageResponse, FileResponse
+from app.core.config import settings
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
@@ -33,7 +34,7 @@ def get_chat(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep):
         )
     if chat.user_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to view this chat"
         )
     
@@ -56,9 +57,105 @@ def delete_chat(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep
         )
     if chat.user_id != current_user.id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to delete this chat"
         )
     session.delete(chat)
     session.commit()
+    return
+
+
+@router.post("/{chat_id}/files", response_model=list[FileResponse])
+def upload_file(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep, files: list[UploadFile] = FastAPIFile(...)):
+    chat = session.exec(select(Chat).where(Chat.id == chat_id)).first()
+    if chat is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found"
+        )
+    if chat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to upload files to this chat"
+        )
+    existing_files = session.exec(select(File).where(File.chat_id == chat_id)).all()
+    file_count = len(files) + len(existing_files)
+    if file_count > 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You can only upload up to 5 files at a time"
+        )
+    
+    total_size = 0
+    for file in files:
+        total_size += file.size
+    if total_size > settings.MAX_TOTAL_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You can only upload files up to 50MB at a time"
+        )
+    
+    db_files = []
+    for file in files:
+        db_file = File(
+            name=file.filename,
+            file_path=file.filename,
+            file_size=file.size,
+            mime_type=file.content_type,
+            status=FilesStatus.PENDING.value,
+            chat_id=chat_id
+        )
+        session.add(db_file)
+        db_files.append(db_file)
+    session.commit()
+    for db_file in db_files:
+        session.refresh(db_file)
+    return db_files
+
+@router.get("/{chat_id}/files", response_model=list[FileResponse])
+def get_files(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep):
+    chat = session.exec(select(Chat).where(Chat.id == chat_id)).first()
+    if chat is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found"
+        )
+    if chat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to view files in this chat"
+        )
+    
+    files = session.exec(select(File).where(File.chat_id == chat_id)).all()
+
+    return [FileResponse.model_validate(file) for file in files]
+
+
+@router.delete("/{chat_id}/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_file(chat_id: UUID, file_id: UUID, current_user: CurrentUserDep, session: SessionDep):
+    chat = session.exec(select(Chat).where(Chat.id == chat_id)).first()
+    if chat is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat not found"
+        )
+    if chat.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to delete files in this chat"
+        )
+    
+    file = session.exec(select(File).where(File.id == file_id)).first()
+    if file is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+    if file.chat_id != chat_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not authorized to delete this file"
+        )
+    session.delete(file)
+    session.commit()    
     return
