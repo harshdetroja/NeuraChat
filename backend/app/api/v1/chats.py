@@ -5,6 +5,7 @@ from app.api.deps import SessionDep, CurrentUserDep
 from app.models.db import Chat, FilesStatus, Message, File
 from app.models.schemas import ChatCreate, ChatResponse, FetchChatResponse, MessageResponse, FileResponse
 from app.core.config import settings
+from app.services.storage import storage_service
 
 router = APIRouter(prefix="/chats", tags=["Chats"])
 
@@ -66,7 +67,7 @@ def delete_chat(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep
 
 
 @router.post("/{chat_id}/files", response_model=list[FileResponse])
-def upload_file(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep, files: list[UploadFile] = FastAPIFile(...)):
+async def upload_file(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep, files: list[UploadFile] = FastAPIFile(...)):
     chat = session.exec(select(Chat).where(Chat.id == chat_id)).first()
     if chat is None:
         raise HTTPException(
@@ -97,9 +98,13 @@ def upload_file(chat_id: UUID, current_user: CurrentUserDep, session: SessionDep
     
     db_files = []
     for file in files:
+
+        object_key = f"chats/{chat_id}/{uuid4().hex[:8]}_{file.filename}"
+        file_bytes = await file.read()
+        fobject_key = storage_service.upload_file_to_s3(file_bytes, object_key, file.content_type)
         db_file = File(
             name=file.filename,
-            file_path=file.filename,
+            file_path=fobject_key,
             file_size=file.size,
             mime_type=file.content_type,
             status=FilesStatus.PENDING.value,
@@ -156,6 +161,7 @@ def delete_file(chat_id: UUID, file_id: UUID, current_user: CurrentUserDep, sess
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to delete this file"
         )
+    storage_service.delete_file_from_s3(file.file_path)
     session.delete(file)
     session.commit()    
     return
