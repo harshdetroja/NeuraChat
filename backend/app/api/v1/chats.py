@@ -1,4 +1,4 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException, UploadFile, status, File as FastAPIFile
 from sqlmodel import Session, select
 from app.api.deps import SessionDep, CurrentUserDep
